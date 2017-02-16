@@ -38,7 +38,7 @@ private:
    float time_interval;
 
    //Confserver variables
-   bool assigning_images;
+   bool assigning_images,camera;
    uint8_t assigning_type;
 
    //Hardware estimate variables
@@ -78,6 +78,7 @@ private slots:
    void changeCameraProperties(cameraProperty::ConstPtr msg);
    void changeCamPID(PID::ConstPtr msg);
    void changeROI(ROI::ConstPtr msg);
+   void changeWorldConfiguration(worldConfig::ConstPtr msg);
    bool doReloc(requestReloc::Request &req,requestReloc::Response &res);
    bool setExtDebug(requestExtendedDebug::Request &req,requestExtendedDebug::Response &res);
 public slots:

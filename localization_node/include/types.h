@@ -21,6 +21,8 @@
 #define MAINFILENAME "main.cfg"
 #define CONTROLFILENAME "control.cfg"
 #define PIDFILENAME "pid.cfg"
+#define PROPERTYFILENAME "property.cfg"
+#define WORLDFILENAME "worldconstruction.cfg"
 
 // LUT DEFINES
 #define LUT_SIZE 256*256*256
@@ -161,6 +163,16 @@ typedef union fieldDimensions{
     struct gameField fieldDims;
     int dimensions[23];
 } fieldDimensions;
+
+//############ WEIGHTS PARAMETERS ###############
+//###############################################
+
+#define REFERENCE 2*2
+#define DISTANCE 4*4
+
+
+//###############################################
+//###############################################
 
 /*
 ############################################################################

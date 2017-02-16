@@ -3,6 +3,7 @@
 Localization::Localization(int rob_id, ros::NodeHandle *par , bool *init_success, bool use_camera, QObject *parent) : QObject(parent)
 {
    initVariables();
+   camera = use_camera;
    if(!use_camera) is_hardware_ready = true; // for test purposes
    else is_hardware_ready = false;
    //#### Initialize major components ####
@@ -15,7 +16,7 @@ Localization::Localization(int rob_id, ros::NodeHandle *par , bool *init_success
    correct_initialization = initWorldMap();
    if(!correct_initialization) { (*init_success) = false; return; }
 
-   confserver->setOmniVisionConf(processor->getMirrorConfAsMsg(),processor->getVisionConfAsMsg(),processor->getImageConfAsMsg());
+   confserver->setOmniVisionConf(processor->getMirrorConfAsMsg(),processor->getVisionConfAsMsg(),processor->getImageConfAsMsg(), processor->getBallConfAsMsg(), processor->getObsConfAsMsg(), processor->getRLEConfAsMsg());
    confserver->setProps(processor->getCamProperties());
    confserver->setPIDValues(processor->getPropControlerPID());
    confserver->setROIs(processor->getRois());
@@ -35,6 +36,7 @@ Localization::Localization(int rob_id, ros::NodeHandle *par , bool *init_success
    connect(confserver,SIGNAL(changedCameraProperties(cameraProperty::ConstPtr)),this,SLOT(changeCameraProperties(cameraProperty::ConstPtr)));
    connect(confserver,SIGNAL(changedCamPID(PID::ConstPtr)),this,SLOT(changeCamPID(PID::ConstPtr)));
    connect(confserver,SIGNAL(changedROIConfiguration(ROI::ConstPtr)),this,SLOT(changeROI(ROI::ConstPtr)));
+   connect(confserver,SIGNAL(changedWorldConfiguration(worldConfig::ConstPtr)),this,SLOT(changeWorldConfiguration(worldConfig::ConstPtr)));
    //#########################################################################
 
    //## Setup ROS Pubs and Subs ##
@@ -75,18 +77,21 @@ void Localization::discoverWorldModel() // Main Function
    // Localization code
    if(have_image && is_hardware_ready){
       //current_hardware_state.imu_value = 0;
-      if(reloc){last_state.robot_pose.z = current_hardware_state.imu_value;
-      ROS_INFO("Reloc Angle: %d",current_hardware_state.imu_value);
+      if(reloc){
+        last_state.robot_pose.z = current_hardware_state.imu_value;
+        ROS_INFO("Reloc Angle: %d",current_hardware_state.imu_value);
       }
-      processor->detectInterestPoints();
-//      calcHistOrientation();
       //loctime.start();
-      processor->creatWorld(current_state.robot_pose.z);
+      //calcHistOrientation();
+
+      processor->detectInterestPoints(current_state.robot_pose.z);
       //std::cerr << "Tempo localização:  " << double(loctime.elapsed())<<endl;
       if(reloc){ // Global localization
          // Assign hardware angle to vision estimate angle
          // Do global localization
+         //loctime.start();
          reloc = computeGlobalLocalization(0);
+         //std::cerr << "Tempo localização:  " << double(loctime.elapsed())<<endl;
       } else { // Local localization
          //loctime.start();
          // Do local localization
@@ -95,6 +100,7 @@ void Localization::discoverWorldModel() // Main Function
          //std::cerr << "Tempo localização:  " << double(loctime.elapsed())<<endl;
       }
       //Publish information
+      processor->creatWorld();
       computeVelocities();
       decideBallPossession();
       detectObstacles();
@@ -140,6 +146,7 @@ void Localization::discoverWorldModel() // Main Function
       //Compensate time took in the function
       timing = requiredTiming-measure.elapsed();
       if(timing<0) timing = requiredTiming;
+      //std::cerr << "Tempo localização:  " << double(measure.elapsed())<<endl;
       parentTimer->start(timing);
    }
 
@@ -165,6 +172,7 @@ void Localization::initVariables()
    qRegisterMetaType<cameraProperty::ConstPtr>("cameraProperty::ConstPtr");
    qRegisterMetaType<PID::ConstPtr>("PID::ConstPtr");
    qRegisterMetaType<ROI::ConstPtr>("ROI::ConstPtr");
+   qRegisterMetaType<worldConfig::ConstPtr>("worldConfig::ConstPtr");
 
    //QString home = QString::fromStdString(getenv("HOME"));
    //QString cfgDir = home+QString(CONFIGFOLDERPATH);
@@ -278,22 +286,44 @@ void Localization::changeImageConfiguration(imageConfig::ConstPtr msg)
 
 void Localization::changeCameraProperties(cameraProperty::ConstPtr msg)
 {
-   ROS_WARN("New property value set.");
-   parentTimer->stop();
-   processor->setCamPropreties(msg);
-   parentTimer->start(requiredTiming);
+  if(camera){
+     ROS_WARN("New property value set.");
+     parentTimer->stop();
+     processor->setCamPropreties(msg);
+     parentTimer->start(requiredTiming);
+   }
+   else ROS_WARN("Camera not Connected!.");
 }
 
 void Localization::changeCamPID(PID::ConstPtr msg)
 {
-   processor->setPropControlerPID(msg);
+  if(camera){
+     ROS_WARN("New PID value set.");
+     parentTimer->stop();
+     processor->setPropControlerPID(msg);
+     parentTimer->start(requiredTiming);
+   }
+  else ROS_WARN("Camera not Connected!.");
 }
 void Localization::changeROI(ROI::ConstPtr msg)
 {
-   ROS_WARN("New ROI set");
-   parentTimer->stop();
-   processor->setROIs(msg);
-   parentTimer->start(requiredTiming);
+  if(camera){
+    ROS_WARN("New ROI set. ");
+    parentTimer->stop();
+    processor->setROIs(msg);
+    parentTimer->start(requiredTiming);
+  }
+  else ROS_WARN("Camera not Connected!.");
+}
+
+void Localization::changeWorldConfiguration(worldConfig::ConstPtr msg)
+{
+  ROS_INFO("New World Configuration set. ");
+  parentTimer->stop();
+  if(msg->RLE==true)processor->changeRLEConfiguration(msg);
+  else if(msg->RLE==false)processor->changeBlobsConfiguration(msg);
+  else ROS_ERROR("ERROR SENDING WORLD CONFIGURATION. ");
+  parentTimer->start(requiredTiming);
 }
 /*************************************************************************************/
 /*************************************************************************************/
@@ -553,6 +583,9 @@ void Localization::calcHistOrientation()
   if(current_hardware_state.imu_value < 90.0 && histEstimate > 270.0) histEstimate -= 360.0;
   if(current_hardware_state.imu_value > 270.0 && histEstimate < 90.0) histEstimate += 360.0;
   current_hardware_state.imu_value = 0.0 * current_hardware_state.imu_value + 1.0 * histEstimate;
+
+  /*delete[] horHist;
+  delete[] verHist;*/
 }
 
 void Localization::rotatePoints(int angle)
@@ -596,7 +629,7 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
       }
       if((positionError>0)&&(inboundPoints>=processor->mappedLinePoints.size()*0.9)){ //if all linePoints are inbounds, enquire the error
          if(positionError<leastError){
-           num = inboundPoints;
+            //num = inboundPoints;
             leastError = positionError;
             leastIndex = i;
          }
@@ -628,7 +661,7 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
              }
             if((positionError>0) && (inboundPoints>=processor->mappedLinePoints.size()*0.9)){
               if(positionError<leastError){
-                num = inboundPoints;
+                //num = inboundPoints;
                 leastError = positionError;
                 leastPos.x = x;
                 leastPos.y = y;
@@ -695,7 +728,7 @@ int Localization::getLine(float x, float y) //Returns matching map position
 
 float Localization::errorFunction(float error, int p)
 {
-  double err = 1-((0.5*0.5)/((0.5*0.5)+error*error));
+  double err = 1-((0.5*0.5)/((0.5*0.5)+(error*error)));
    return processor->LinePointsWeight[p] * err;
 }
 

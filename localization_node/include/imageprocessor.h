@@ -18,6 +18,7 @@
 #include "minho_team_ros/cameraProperty.h"
 #include "minho_team_ros/PID.h"
 #include "minho_team_ros/ROI.h"
+#include "minho_team_ros/worldConfig.h"
 #include <iostream>
 #include <vector>
 #include "Blob.h"
@@ -31,6 +32,7 @@ using minho_team_ros::imageConfig;
 using minho_team_ros::cameraProperty;
 using minho_team_ros::PID;
 using minho_team_ros::ROI;
+using minho_team_ros::worldConfig;
 
 class ImageProcessor
 {
@@ -38,9 +40,9 @@ public:
    ImageProcessor(int rob_id, bool begin, bool *init_success);
    typedef Mat* (ImageProcessor::*imageAcquisitionFunction)(bool *success);
    /* Detection Functions */
-   void detectInterestPoints(); // Detects linePoints, ballPoints and obstaclePoints
+   void detectInterestPoints(int orientation); // Detects linePoints, ballPoints and obstaclePoints
    void detectBallPosition(); // Given the detected ballRLE find the optimal candidate
-   void creatWorld(int orientation);
+   void creatWorld();
 
    /* Image Output Functions */
    Mat *getImage(bool *success); // Returns camera image pointer
@@ -120,9 +122,16 @@ public:
    Point2d getPropError(int prop_in_use); // Returns error of property in use
    vector<ROI> getRois(); //  Returns ROI's in use
    void setROIs(ROI::ConstPtr msg); // Set ROI's to use
+   void changeBlobsConfiguration(worldConfig::ConstPtr msg);
+   void changeRLEConfiguration(worldConfig::ConstPtr msg);
 
    //Blobs
    Blob obsBlob, ballBlob;
+
+   inline worldConfig getBallConfAsMsg(){ return ballParameters;}
+   inline worldConfig getObsConfAsMsg(){ return obsParameters;}
+   inline worldConfig getRLEConfAsMsg(){ return ballRLE;}
+
 
 private:
    /* Camera Driver and parameters*/
@@ -155,12 +164,17 @@ private:
 
    //ConfigFiles strings
    QString field; QString agent;
-   QString mirrorParamsPath, imageParamsPath ,maskPath,lutPath;
-   QString fieldMapPath;
+   QString mirrorParamsPath, imageParamsPath ,maskPath,lutPath, pidPath;
+   QString fieldMapPath, worldPath;
    QString imgFolderPath;
 
    //ROI Variables
    ROI whiteRoi, blackRoi;
+
+   // World Construction
+   worldConfig ballParameters, obsParameters, ballRLE;
+   bool getWorldConfiguration();
+   bool WriteWorldConfiguration();
 };
 
 #endif // IMAGEPROCESSOR_H

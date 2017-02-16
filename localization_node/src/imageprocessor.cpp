@@ -6,7 +6,7 @@ ImageProcessor::ImageProcessor(int rob_id, bool use_camera, bool *init_success)
     // Initialize GigE Camera Driver
     if(use_camera) {
       camera=true;
-      omniCamera = new BlackflyCam(false); //OmniVisionCamera Handler
+      omniCamera = new BlackflyCam(false, rob_id); //OmniVisionCamera Handler
       ROS_INFO("Using GigE Camera for image acquisition.");
       acquireImage = &ImageProcessor::getImage;
     } else {
@@ -39,6 +39,11 @@ ImageProcessor::ImageProcessor(int rob_id, bool use_camera, bool *init_success)
         ROS_ERROR("Error Reading World mapping configurations");
         (*init_success) = false; return;
     } else ROS_INFO("World mapping configurations Ready.");
+
+    if(!getWorldConfiguration()){
+      ROS_ERROR("Error Reading %s.",WORLDFILENAME);
+      (*init_success) = false; return;
+    }else ROS_INFO("World parameters configuration Ready.");
 
     variablesInitialization(); // Initialize common Variables
     rleModInitialization(); // Initialize RLE mod data
@@ -157,6 +162,8 @@ bool ImageProcessor::initializeBasics(int rob_id)
     lutPath = cfgDir+agent+"/"+QString(LUTFILENAME);
     maskPath = cfgDir+agent+"/"+QString(MASKFILENAME);
     fieldMapPath = cfgDir+QString(FIELDSFOLDERPATH)+field+".map";
+    pidPath = cfgDir+agent+"/"+QString(PIDFILENAME);
+    worldPath = cfgDir+agent+"/"+QString(WORLDFILENAME);
 
     ROS_INFO("System Configuration : %s in %s Field",agent.toStdString().c_str(),
     field.toStdString().c_str());
@@ -283,7 +290,7 @@ void ImageProcessor::drawWorldPoints(Mat *buffer)
 }
 
 // Detects interest points, as line points, ball points and obstacle points using RLE
-void ImageProcessor::detectInterestPoints()
+void ImageProcessor::detectInterestPoints(int orientation)
 {
     // Obsrtacle blobs initialization
 	  obsBlob = Blob(); ballBlob = Blob();
@@ -297,7 +304,7 @@ void ImageProcessor::detectInterestPoints()
     rleLinesRad_2 = RLE(linesRad, UAV_GREEN_BIT, UAV_WHITE_BIT, UAV_GREEN_BIT, 2, 1, 2, 30);
 
     // RLE Ball
-    rleBallRad = RLE(linesRad, UAV_GREEN_BIT, UAV_ORANGE_BIT, UAV_GREEN_BIT, 4, 2, 4, 20);
+    rleBallRad = RLE(linesRad, UAV_GREEN_BIT, UAV_ORANGE_BIT, UAV_GREEN_BIT, ballRLE.value_a, ballRLE.value_b, ballRLE.value_c, ballRLE.window);
 
     // RLE Obstacles
     rleObs = RLE(linesRad, UAV_GREEN_BIT, UAV_BLACK_BIT, UAV_GREEN_BIT, 20, 8, 0, 30);
@@ -322,16 +329,16 @@ void ImageProcessor::detectInterestPoints()
     /*ballCentroids.clear();
     kMeans ballKMeans(ballPoints,(int)ceil(ballPoints.size()/4)+1,30);
     ballCentroids = ballKMeans.getClusters();*/
+
+    // Maps line and obstacle points to world
+    mapPoints(orientation);
 }
 
-void ImageProcessor::creatWorld(int orientation)
+void ImageProcessor::creatWorld()
 {
-  // Maps line and obstacle points to world
-  mapPoints(orientation);
-
   // Create Blobs due to obstacle points detected
-  obsBlob.createBlobs(mappedObstaclePoints, 0.17, 2, getCenter(), OBS_BLOB, orientation);
-  ballBlob.createBlobs(mappedBallPoints, 0.12, 1, getCenter(), BALL_BLOB, orientation);
+  obsBlob.createBlobs(mappedObstaclePoints, double(obsParameters.value_a/100.00), obsParameters.value_b, getCenter(), OBS_BLOB);
+  ballBlob.createBlobs(mappedBallPoints, double(ballParameters.value_a/100.00), ballParameters.value_b, getCenter(), BALL_BLOB);
 }
 
 // Maps poins to real world
@@ -341,8 +348,6 @@ void ImageProcessor::mapPoints(int robot_heading)
 
    Point2d point;
    double pointRelX, pointRelY, ang;
-   double reference = 2 * 2;
-   long int d2 = 4*4;
    double sqDist = 0.00;
 
 
@@ -352,7 +357,7 @@ void ImageProcessor::mapPoints(int robot_heading)
       if(point.x<=(mirrorConf.max_distance-0.5) && point.x>RROBOT) {
         mappedLinePoints.push_back(mapPointToRobot(robot_heading, point));
         sqDist = sqrt(pow(worldMapping(linePoints[i]).x,2));
-        LinePointsWeight.push_back( (reference + d2)/ (d2 + sqDist));
+        LinePointsWeight.push_back( (REFERENCE + DISTANCE)/ (DISTANCE + sqDist));
       }
    }
 
@@ -926,64 +931,62 @@ imageConfig ImageProcessor::getImageConfAsMsg()
 // Set Camera Properties given the values contained in the message
 void ImageProcessor::setCamPropreties(cameraProperty::ConstPtr msg)
 {
-	if(msg->reset!=true){
-		if(msg->property_id==0) {
-			omniCamera->setBrigtness(msg->value_a);
-			omniCamera->setProps(BRI);
-			}
-		else if(msg->property_id==1) {
-			omniCamera->setGain(msg->value_a);
-			omniCamera->setProps(GAI);
-			}
-		else if(msg->property_id==2) {
-			omniCamera->setShutter(msg->value_a);
-			omniCamera->setProps(SHU);
-			}
-		else if(msg->property_id==3) {
-			omniCamera->setGamma(msg->value_a);
-			omniCamera->setProps(GAM);
-			}
-		else if(msg->property_id==4) {
-			omniCamera->setSaturation(msg->value_a);
-			omniCamera->setProps(SAT);
-			}
-		else if(msg->property_id==5) {
+  	if(msg->reset!=true){
+  		if(msg->property_id==0) {
+  			omniCamera->setBrigtness(msg->value_a);
+  			omniCamera->setProps(BRI);
+  			}
+  		else if(msg->property_id==1) {
+  			omniCamera->setGain(msg->value_a);
+  			omniCamera->setProps(GAI);
+  			}
+  		else if(msg->property_id==2) {
+  			omniCamera->setShutter(msg->value_a);
+  			omniCamera->setProps(SHU);
+  			}
+  		else if(msg->property_id==3) {
+  			omniCamera->setGamma(msg->value_a);
+  			omniCamera->setProps(GAM);
+  			}
+  		else if(msg->property_id==4) {
+  			omniCamera->setSaturation(msg->value_a);
+  			omniCamera->setProps(SAT);
+  			}
+  		else if(msg->property_id==5) {
 
-				if(msg->blue==false){
-					omniCamera->setWhite_Balance_valueA(msg->value_a);
-					omniCamera->setProps(WB);
-				}
-				else {
-					omniCamera->setWhite_Balance_valueB(msg->value_a);
-					omniCamera->setProps(WB);
-				}
-			}
-		} else omniCamera->toggleFirsttime();
+  				if(msg->blue==false){
+  					omniCamera->setWhite_Balance_valueA(msg->value_a);
+  					omniCamera->setProps(WB);
+  				}
+  				else {
+  					omniCamera->setWhite_Balance_valueB(msg->value_a);
+  					omniCamera->setProps(WB);
+  				}
+  			}
+        omniCamera->writePropConfig();
+  		} else omniCamera->toggleFirsttime();
 }
 
 // Returns vector of Camera Properties values
 vector<float> ImageProcessor::getCamProperties()
 {
-
-	vector<float> props(7);
-
-	if(camera){
-	props[0] = omniCamera->getBrigtness();
-	props[1] = omniCamera->getGain();
-	props[2] = omniCamera->getShuttertime();
-	props[3] = omniCamera->getGamma();
-	props[4] = omniCamera->getSaturation();
-	props[5] = omniCamera->getWhite_Balance_valueA();
-	props[6] = omniCamera->getWhite_Balance_valueB();
-	}
-
-	return props;
+  	vector<float> props(7);
+  	if(camera){
+  	props[0] = omniCamera->getBrigtness();
+  	props[1] = omniCamera->getGain();
+  	props[2] = omniCamera->getShuttertime();
+  	props[3] = omniCamera->getGamma();
+  	props[4] = omniCamera->getSaturation();
+  	props[5] = omniCamera->getWhite_Balance_valueA();
+  	props[6] = omniCamera->getWhite_Balance_valueB();
+  	}
+  	return props;
 }
 
 // Set PID controler given the values in the message
 void ImageProcessor::setPropControlerPID(PID::ConstPtr msg)
 {
-	if(msg->calibrate!=true) omniCamera->setPropControlPID(msg->property_id,msg->p,msg->i,msg->d,msg->blue);
+  if(msg->calibrate!=true) omniCamera->setPropControlPID(msg->property_id,msg->p,msg->i,msg->d,msg->blue);
 	else omniCamera->toggleCalibrate();
 }
 
@@ -992,13 +995,8 @@ vector<float> ImageProcessor::getPropControlerPID()
 {
     vector<float> pid_conf(21);
 
-    QString home = QString::fromStdString(getenv("HOME"));
-    QString cfgDir = home+QString(CONFIGFOLDERPATH);
-
-    QString pidPath = cfgDir+QString(PIDFILENAME);
-
-	QFile file(pidPath);
-	if(!file.open(QIODevice::ReadOnly)) {
+	 QFile file(pidPath);
+	 if(!file.open(QIODevice::ReadOnly)) {
         ROS_ERROR("ERROR READING pid.cfg FILE");
     }
 
@@ -1016,7 +1014,7 @@ vector<float> ImageProcessor::getPropControlerPID()
 		if(pid_list.size()==0)count_list++;
 	}
 
-	//This is to do not read EXPOSSURE VALUES of file
+	//This line is to do not read EXPOSSURE VALUES of file
 	line = in.readLine();
 	ROI Roi;
 
@@ -1039,14 +1037,6 @@ vector<float> ImageProcessor::getPropControlerPID()
     return pid_conf;
 }
 
-// Returns error of Property in use
-Point2d ImageProcessor::getPropError(int prop_in_use)
-{
-	//Point2d error;
-	//error = omniCamera->getError(prop_in_use);
-	//ROS_ERROR("Valor da prop %f",error.y);
-	return omniCamera->getError(prop_in_use);
-}
  // Returns vector of type ROI containig white and black ROI's
 vector<ROI> ImageProcessor::getRois()
 {
@@ -1060,6 +1050,105 @@ vector<ROI> ImageProcessor::getRois()
 // Sets ROI's on camera
 void ImageProcessor::setROIs(ROI::ConstPtr msg)
 {
-	if(msg->white==true)omniCamera->setWhiteROI(msg->x,msg->y,msg->d);
-	else omniCamera->setBlackROI(msg->x,msg->y,msg->d);
+  	if(msg->white==true){
+      omniCamera->setWhiteROI(msg->x,msg->y,msg->d);
+    }
+  	else {
+      omniCamera->setBlackROI(msg->x,msg->y,msg->d);
+    }
+}
+
+void ImageProcessor::changeBlobsConfiguration(worldConfig::ConstPtr msg)
+{
+  if(msg->ball_obs==true){
+    ballParameters = *msg;
+  }
+  else obsParameters = *msg;
+
+  WriteWorldConfiguration();
+}
+
+void ImageProcessor::changeRLEConfiguration(worldConfig::ConstPtr msg)
+{
+  ballRLE = *msg;
+  WriteWorldConfiguration();
+}
+
+bool ImageProcessor::getWorldConfiguration()
+{
+  QFile file(worldPath);
+  if(!file.open(QIODevice::ReadOnly)) {
+    return false;
+  }
+  QTextStream in(&file);
+
+  QString blob_obs = in.readLine();
+  QString blob_ball = in.readLine();
+  QString rle_ball = in.readLine();
+  blob_obs = blob_obs.right(blob_obs.size()-blob_obs.indexOf('=')-1);
+  blob_ball = blob_ball.right(blob_ball.size()-blob_ball.indexOf('=')-1);
+  rle_ball = rle_ball.right(rle_ball.size()-rle_ball.indexOf('=')-1);
+  QStringList values = blob_obs.split(",");
+
+  if(values.size()!=2) {
+     ROS_ERROR("Bad Configuration (1) in %s",WORLDFILENAME);
+     return false;
+  }
+
+  obsParameters.value_a = values.at(0).toInt();
+  obsParameters.value_b = values.at(1).toInt();
+  obsParameters.ball_obs = false;
+  obsParameters.RLE = false;
+
+  values = blob_ball.split(",");
+  if(values.size()!=2) {
+     ROS_ERROR("Bad Configuration (1) in %s",WORLDFILENAME);
+     return false;
+  }
+  ballParameters.value_a = values.at(0).toInt();
+  ballParameters.value_b = values.at(1).toInt();
+  ballParameters.ball_obs = true;
+  obsParameters.RLE = false;
+
+  values = rle_ball.split(",");
+  if(values.size()!=4) {
+     ROS_ERROR("Bad Configuration (1) in %s",WORLDFILENAME);
+     return false;
+  }
+  ballRLE.value_a = values.at(0).toInt();
+  ballRLE.value_b = values.at(1).toInt();
+  ballRLE.value_c = values.at(2).toInt();
+  ballRLE.window = values.at(3).toInt();
+  ballRLE.ball_obs = false;
+  ballRLE.RLE = true;
+
+  file.close();
+
+  return true;
+}
+
+bool ImageProcessor::WriteWorldConfiguration()
+{
+  QFile file(worldPath);
+  if(!file.open(QIODevice::WriteOnly)){
+  ROS_ERROR("Error writing to %s.",WORLDFILENAME);
+  return false;
+}
+  QTextStream in(&file);
+
+  in << "OBS[0]=" << obsParameters.value_a << "," << obsParameters.value_b << "\r\n";
+  in << "BALL[1]=" << ballParameters.value_a << "," << ballParameters.value_b << "\r\n";
+  in << "RLEBALL[2]=" << ballRLE.value_a << "," << ballRLE.value_b << "," << ballRLE.value_c << "," << ballRLE.window << "\r\n";
+  QString message = QString("#DONT CHANGE THE ORDER OF THE CONFIGURATIONS");
+  in << message;
+
+  file.close();
+  return true;
+}
+
+
+// Returns error of Property in use
+Point2d ImageProcessor::getPropError(int prop_in_use)
+{
+  return omniCamera->getError(prop_in_use);
 }
