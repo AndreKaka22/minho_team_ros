@@ -231,7 +231,6 @@ bool Localization::initWorldMap()
 
    QStringList values,positions;
    QString auxPos,auxVal;
-   int tempX, tempY;
 
    for(unsigned int i=0;i<currentField.FIELD_POSITIONS;i++){
        values = in.readLine().split(")");
@@ -627,7 +626,6 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
    double xCor = 0.0, yCor = 0.0;
    Point2d wp;
    Point2d leastPos;
-   int tempX, tempY;
 
    // Tamanho da matriz
    int K = float(currentField.FIELD_LENGTH/currentField.SCALE)+1;
@@ -705,8 +703,8 @@ void Localization::computeLocalLocalization() //compute next localization locall
    double positionError = 0.0, leastError = 100000.0;
    double xCor = 0.0, yCor = 0.0;
    float localGap = 0.5;
-   int tempX, tempY;
    Point2d wp;
+   
    for(float x=last_state.robot_pose.x-localGap; x<=last_state.robot_pose.x+localGap; x+=0.1)
       for(float y=last_state.robot_pose.y-localGap; y<=last_state.robot_pose.y+localGap; y+=0.1){
          positionError = 0.0;

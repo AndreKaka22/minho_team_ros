@@ -61,7 +61,6 @@ private:
    unsigned int service_call_counter;
 
    // Localization variables
-   struct nodo *worldMap;
    struct nodo **WorldMap;
    field currentField;
 
