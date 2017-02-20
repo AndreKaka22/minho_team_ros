@@ -67,6 +67,9 @@ private:
 
    vector<Point2d> rotatedLinePoints;
 
+   int getFieldIndexX(float value);
+   int getFieldIndexY(float value);
+
 private slots:
    void initVariables();
    void initializeKalmanFilter();

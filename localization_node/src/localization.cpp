@@ -240,12 +240,10 @@ bool Localization::initWorldMap()
        auxPos = values.at(0);
        auxPos.remove(0,1);
        positions = auxPos.split(",");
-       tempX = float((positions.at(0).toDouble()+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
-       tempY = float((positions.at(1).toDouble()+currentField.HALF_FIELD_WIDTH)/currentField.SCALE);
-       WorldMap[tempX][tempY].x = positions.at(0).toDouble();
-       WorldMap[tempX][tempY].y = positions.at(1).toDouble();
-       WorldMap[tempX][tempY].closestDistance = auxVal.toDouble();
-       //WorldMap[tempX][tempY].gradient = 0;
+
+       WorldMap[getFieldIndexX(positions.at(0).toDouble())][getFieldIndexY(positions.at(1).toDouble())].x = positions.at(0).toDouble();
+       WorldMap[getFieldIndexX(positions.at(0).toDouble())][getFieldIndexY(positions.at(1).toDouble())].y = positions.at(1).toDouble();
+       WorldMap[getFieldIndexX(positions.at(0).toDouble())][getFieldIndexY(positions.at(1).toDouble())].closestDistance = auxVal.toDouble();
    }
 
    file.close();
@@ -649,9 +647,7 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
              inboundPoints++;
              xCor = ceil(((processor->mappedLinePoints[p].x+wp.x)*10)-0.49)/10; // calcula aproximação mais rigorasa ao do ponto ao mapa
              yCor = ceil(((processor->mappedLinePoints[p].y+wp.y)*10)-0.49)/10;
-             tempX = float((xCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE); // convertemos coordenadas em metros para XY da matriz
-             tempY = float((yCor+currentField.HALF_FIELD_WIDTH)/currentField.SCALE);
-             positionError += errorFunction(WorldMap[tempX][tempY].closestDistance, p); // calculamos erro
+             positionError += errorFunction(WorldMap[getFieldIndexX(xCor)][getFieldIndexY(yCor)].closestDistance, p);
           }
        }
        if((positionError>0)&&(inboundPoints>=processor->mappedLinePoints.size()*0.9)){ //if all linePoints are inbounds, enquire the error
@@ -680,16 +676,14 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
                   inboundPoints++;
                   xCor = ceil(((processor->mappedLinePoints[p].x+wp.x)*10)-0.49)/10;
                   yCor = ceil(((processor->mappedLinePoints[p].y+wp.y)*10)-0.49)/10;
-                  tempX = float((xCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
-                  tempY = float((yCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
-                  positionError += errorFunction(WorldMap[tempX][tempY].closestDistance, p);;
+                  positionError += errorFunction(WorldMap[getFieldIndexX(xCor)][getFieldIndexY(yCor)].closestDistance, p);
                }
              }
             if((positionError>0) && (inboundPoints>=processor->mappedLinePoints.size()*0.9)){
               if(positionError<leastError){
                 leastError = positionError;
-                leastPos.x = WorldMap[tempX][tempY].x;
-                leastPos.y = WorldMap[tempX][tempY].y;
+                leastPos.x = X;
+                leastPos.y = Y;
               }
             }
           }
@@ -701,7 +695,7 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
     vision.angle = current_state.robot_pose.z;
     current_state.robot_pose.x = leastPos.x;
     current_state.robot_pose.y = leastPos.y;
-    return false;
+    return true;
 }
 
 void Localization::computeLocalLocalization() //compute next localization locally
@@ -724,9 +718,7 @@ void Localization::computeLocalLocalization() //compute next localization locall
                inboundPoints++;
                xCor = ceil(((processor->mappedLinePoints[p].x+wp.x)*10)-0.49)/10;
                yCor = ceil(((processor->mappedLinePoints[p].y+wp.y)*10)-0.49)/10;
-               tempX = float((xCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
-               tempY = float((yCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
-               positionError += errorFunction(WorldMap[tempX][tempY].closestDistance, p);
+               positionError += errorFunction(WorldMap[getFieldIndexX(xCor)][getFieldIndexY(yCor)].closestDistance, p);
             }
          }
       if((positionError>0)&&(inboundPoints>=processor->mappedLinePoints.size()*0.9)){ //if all linePoints are inbounds, enquire the error
@@ -766,6 +758,19 @@ bool Localization::isInbounds(Point2d point,Point2d center)
            && ((y>=-(currentField.HALF_FIELD_WIDTH))&&(y<=(currentField.HALF_FIELD_WIDTH)))) return true;
    else return false;
 }
+
+int Localization::getFieldIndexX(float value)
+{
+   int tempX = float((value+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
+   return tempX;
+}
+
+int Localization::getFieldIndexY(float value)
+{
+   int tempX = float((value+currentField.HALF_FIELD_WIDTH)/currentField.SCALE);
+   return tempX;
+}
+
 /*
 Point2d Localization::mapPointToRobot(double orientation, Point2d dist_lut)
 {
