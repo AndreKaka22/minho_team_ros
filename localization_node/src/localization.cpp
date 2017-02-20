@@ -79,7 +79,7 @@ void Localization::discoverWorldModel() // Main Function
       //current_hardware_state.imu_value = 0;
       if(reloc){
         last_state.robot_pose.z = current_hardware_state.imu_value;
-        ROS_INFO("Reloc Angle: %d",current_hardware_state.imu_value);
+        //ROS_INFO("Reloc Angle: %d",current_hardware_state.imu_value);
       }
       //loctime.start();
       //calcHistOrientation();
@@ -212,29 +212,42 @@ bool Localization::initWorldMap()
    currentField.FIELD_WIDTH = mapConfigs.at(1).toDouble();
    currentField.FIELD_POSITIONS = mapConfigs.at(2).toDouble();
    currentField.FIELD_NAME = mapConfigs.at(3);
+   if(mapConfigs.at(4)=="m")currentField.SCALE = 0.1;
+   else currentField.SCALE = 100;
    currentField.HALF_FIELD_LENGTH = currentField.FIELD_LENGTH/2.0;
    currentField.HALF_FIELD_WIDTH = currentField.FIELD_WIDTH/2.0;
    currentField.TERM1 = (currentField.FIELD_LENGTH*10)/2;
    currentField.TERM2 = (currentField.FIELD_WIDTH*10);
    currentField.TERM3 = (currentField.FIELD_WIDTH*10)/2;
 
-   worldMap = (struct nodo*)calloc(currentField.FIELD_POSITIONS,sizeof(struct nodo));
-   memset(worldMap,0,sizeof(nodo)*currentField.FIELD_POSITIONS);
+   // Tamanho da matriz
+   int x = float(currentField.FIELD_LENGTH/currentField.SCALE)+1;
+   int y = float(currentField.FIELD_WIDTH/currentField.SCALE)+1;
+
+   WorldMap = (struct nodo**)malloc(x * sizeof(struct nodo *));
+   for(int i = 0; i < x ; i++){
+     WorldMap[i] = (struct nodo*) malloc(y * sizeof(struct nodo));
+   }
+
    QStringList values,positions;
    QString auxPos,auxVal;
+   int tempX, tempY;
 
    for(unsigned int i=0;i<currentField.FIELD_POSITIONS;i++){
        values = in.readLine().split(")");
        auxVal = values.at(1);
-       auxVal.replace(",",".");
+       auxVal.remove(0,1);
        auxPos = values.at(0);
        auxPos.remove(0,1);
-       auxPos.replace(",",".");
-       positions = auxPos.split(";");
-       worldMap[i].x = positions.at(0).toDouble();
-       worldMap[i].y = positions.at(1).toDouble();
-       worldMap[i].closestDistance = auxVal.toDouble();
+       positions = auxPos.split(",");
+       tempX = float((positions.at(0).toDouble()+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
+       tempY = float((positions.at(1).toDouble()+currentField.HALF_FIELD_WIDTH)/currentField.SCALE);
+       WorldMap[tempX][tempY].x = positions.at(0).toDouble();
+       WorldMap[tempX][tempY].y = positions.at(1).toDouble();
+       WorldMap[tempX][tempY].closestDistance = auxVal.toDouble();
+       //WorldMap[tempX][tempY].gradient = 0;
    }
+
    file.close();
    return true;
 }
@@ -611,97 +624,109 @@ bool Localization::computeGlobalLocalization(int side) //compute initial localiz
    //First, get the detected line points and map them using the whole field positions.
    //Then, compute the error for every position and find the least error position
 
-   unsigned int inboundPoints = 0, leastIndex = 0;
+   unsigned int inboundPoints = 0;
    double positionError = 0.0, leastError = 100000.0;
    double xCor = 0.0, yCor = 0.0;
-   unsigned int num = 0;
-    for(unsigned int i=(currentField.FIELD_POSITIONS/2);i<currentField.FIELD_POSITIONS;i++){
-      positionError = 0.0;
-      inboundPoints = 0;
-      Point2d wp; wp.x = worldMap[i].x; wp.y = worldMap[i].y;
-     for(unsigned int p=0;p<processor->mappedLinePoints.size();p++){ //Counts inbound points and compute error
-         if(isInbounds(processor->mappedLinePoints[p],wp)){
-            inboundPoints++;
-            xCor = ceil(((processor->mappedLinePoints[p].x+worldMap[i].x)*10)-0.49)/10;
-            yCor = ceil(((processor->mappedLinePoints[p].y+worldMap[i].y)*10)-0.49)/10;
-            positionError += errorFunction(worldMap[getLine(xCor,yCor)].closestDistance, p);
-         }
-      }
-      if((positionError>0)&&(inboundPoints>=processor->mappedLinePoints.size()*0.9)){ //if all linePoints are inbounds, enquire the error
-         if(positionError<leastError){
-            //num = inboundPoints;
-            leastError = positionError;
-            leastIndex = i;
-         }
-      }
+   Point2d wp;
+   Point2d leastPos;
+   int tempX, tempY;
+
+   // Tamanho da matriz
+   int K = float(currentField.FIELD_LENGTH/currentField.SCALE)+1;
+   int L = float(currentField.FIELD_WIDTH/currentField.SCALE)+1;
+
+   for(unsigned int i = 0; i < K; i++){
+     for(unsigned int j = 0; j < L; j++){
+       positionError = 0.0;
+       inboundPoints = 0;
+
+       // coordenadas em metros
+       wp.x = WorldMap[i][j].x;
+       wp.y = WorldMap[i][j].y;
+
+      for(unsigned int p=0;p<processor->mappedLinePoints.size();p++){ //Counts inbound points and compute error
+          if(isInbounds(processor->mappedLinePoints[p],wp)){
+             inboundPoints++;
+             xCor = ceil(((processor->mappedLinePoints[p].x+wp.x)*10)-0.49)/10; // calcula aproximação mais rigorasa ao do ponto ao mapa
+             yCor = ceil(((processor->mappedLinePoints[p].y+wp.y)*10)-0.49)/10;
+             tempX = float((xCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE); // convertemos coordenadas em metros para XY da matriz
+             tempY = float((yCor+currentField.HALF_FIELD_WIDTH)/currentField.SCALE);
+             positionError += errorFunction(WorldMap[tempX][tempY].closestDistance, p); // calculamos erro
+          }
+       }
+       if((positionError>0)&&(inboundPoints>=processor->mappedLinePoints.size()*0.9)){ //if all linePoints are inbounds, enquire the error
+          if(positionError<leastError){
+             leastError = positionError;
+             leastPos.x = WorldMap[i][j].x;
+             leastPos.y = WorldMap[i][j].y;
+          }
+       }
+     }
    }
 
-
-   Point2f leastPos;
-   leastPos.x = worldMap[leastIndex].x;
-   leastPos.y = worldMap[leastIndex].y;
    xCor = 0;
    yCor = 0;
    float localGap = 0.3;
-   for(float x=worldMap[leastIndex].x-localGap; x<=worldMap[leastIndex].x+localGap; x+=0.1){
-      for(float y=worldMap[leastIndex].y-localGap; y<=worldMap[leastIndex].y+localGap; y+=0.1){
-        for(float X = x-localGap; X < x+localGap; X++){
-          for(float Y = x-localGap; Y < x+localGap; Y++){
+   for(float x=leastPos.x-localGap; x<=leastPos.x+localGap; x+=0.1){
+      for(float y=leastPos.y-localGap; y<=leastPos.y+localGap; y+=0.1){
+        for(float X = x-localGap; X < x+localGap; X+=0.1){
+          for(float Y = x-localGap; Y < x+localGap; Y+=0.1){
             positionError = 0.0;
-            Point2d wp;
-            wp.x = X; wp.y = Y;
+            wp.x = X;
+            wp.y = Y;
             inboundPoints = 0;
             for(unsigned int p=0;p<processor->mappedLinePoints.size();p++){ //Counts inbound points and compute error
                if(isInbounds(processor->mappedLinePoints[p],wp)){
                   inboundPoints++;
                   xCor = ceil(((processor->mappedLinePoints[p].x+wp.x)*10)-0.49)/10;
                   yCor = ceil(((processor->mappedLinePoints[p].y+wp.y)*10)-0.49)/10;
-                  positionError += errorFunction(worldMap[getLine(xCor,yCor)].closestDistance, p);
+                  tempX = float((xCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
+                  tempY = float((yCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
+                  positionError += errorFunction(WorldMap[tempX][tempY].closestDistance, p);;
                }
              }
             if((positionError>0) && (inboundPoints>=processor->mappedLinePoints.size()*0.9)){
               if(positionError<leastError){
-                //num = inboundPoints;
                 leastError = positionError;
-                leastPos.x = x;
-                leastPos.y = y;
+                leastPos.x = WorldMap[tempX][tempY].x;
+                leastPos.y = WorldMap[tempX][tempY].y;
               }
             }
           }
         }
       }
     }
-    //std::cerr << "Numeros dentro: " << num << "    Numero de pontos de linha: " << processor->mappedLinePoints.size() << '\n';
-    //std::cerr << "Erro menor: " << leastError/num << '\n';
-    //if(leastError < 15){
-    //std::cerr << "Numeros dentro: " << num << "Numero de pontos de linha: " << processor->mappedLinePoints.size() << '\n';
     vision.x = leastPos.x;
     vision.y = leastPos.y;
     vision.angle = current_state.robot_pose.z;
     current_state.robot_pose.x = leastPos.x;
     current_state.robot_pose.y = leastPos.y;
     return false;
-  // }
-   //else return true;
 }
 
 void Localization::computeLocalLocalization() //compute next localization locally
 {
-   unsigned int inboundPoints = 0; Point2f leastPos;
+   unsigned int inboundPoints = 0;
+   Point2d leastPos;
    double positionError = 0.0, leastError = 100000.0;
    double xCor = 0.0, yCor = 0.0;
    float localGap = 0.5;
+   int tempX, tempY;
+   Point2d wp;
    for(float x=last_state.robot_pose.x-localGap; x<=last_state.robot_pose.x+localGap; x+=0.1)
       for(float y=last_state.robot_pose.y-localGap; y<=last_state.robot_pose.y+localGap; y+=0.1){
          positionError = 0.0;
          inboundPoints = 0;
-         Point2d wp; wp.x = x; wp.y = y;
+         wp.x = x;
+         wp.y = y;
          for(unsigned int p=0;p<processor->mappedLinePoints.size();p++){ //Counts inbound points and compute error
             if(isInbounds(processor->mappedLinePoints[p],wp)){
                inboundPoints++;
                xCor = ceil(((processor->mappedLinePoints[p].x+wp.x)*10)-0.49)/10;
                yCor = ceil(((processor->mappedLinePoints[p].y+wp.y)*10)-0.49)/10;
-               positionError += errorFunction(worldMap[getLine(xCor,yCor)].closestDistance, p);
+               tempX = float((xCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
+               tempY = float((yCor+currentField.HALF_FIELD_LENGTH)/currentField.SCALE);
+               positionError += errorFunction(WorldMap[tempX][tempY].closestDistance, p);
             }
          }
       if((positionError>0)&&(inboundPoints>=processor->mappedLinePoints.size()*0.9)){ //if all linePoints are inbounds, enquire the error

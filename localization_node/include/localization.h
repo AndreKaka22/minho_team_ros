@@ -62,6 +62,7 @@ private:
 
    // Localization variables
    struct nodo *worldMap;
+   struct nodo **WorldMap;
    field currentField;
 
    vector<Point2d> rotatedLinePoints;

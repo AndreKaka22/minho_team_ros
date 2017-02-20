@@ -130,6 +130,7 @@ typedef struct field// Current field definitions
     float TERM1, TERM2, TERM3;
     unsigned int MAX_LINE_POINTS;
     QString FIELD_NAME;
+    double SCALE;
 }field;
 
 typedef struct nodo //World Map point of view
@@ -137,7 +138,7 @@ typedef struct nodo //World Map point of view
     double x;
     double y;
     double closestDistance;
-    Vec2 gradient;
+    //Vec2 gradient;
 }nodo;
 
 typedef struct gameField
