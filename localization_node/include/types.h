@@ -23,6 +23,7 @@
 #define PIDFILENAME "pid.cfg"
 #define PROPERTYFILENAME "property.cfg"
 #define WORLDFILENAME "worldconstruction.cfg"
+#define KALMANFILENAME "kalman.cfg"
 
 // LUT DEFINES
 #define LUT_SIZE 256*256*256

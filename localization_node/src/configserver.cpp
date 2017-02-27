@@ -107,7 +107,8 @@ void ConfigServer::processWorldConfig(const worldConfig::ConstPtr &msg)
    emit changedWorldConfiguration(msg);
    if(msg->ball_obs==true)ballConfmsg = *msg;
    else if(msg->ball_obs==false && msg->RLE==false)obsConfmsg = *msg;
-   else RLEConfmsg = *msg;
+   else if(msg->kalman==false)RLEConfmsg = *msg;
+   else KalmanConfmsg = *msg;
 }
 
 bool ConfigServer::omniVisionConfService(minho_team_ros::requestOmniVisionConf::Request &req,minho_team_ros::requestOmniVisionConf::Response &res)
@@ -140,14 +141,25 @@ void ConfigServer::init_mock_image()
 bool ConfigServer::camPropertyConfService(requestCamProperty::Request &req,requestCamProperty::Response &res)
 {
    if(req.property.property_id==5 && req.property.blue==true){prop_used=6; res.property=props_msg[6];}
-   else {res.property=props_msg[req.property.property_id]; prop_used = res.property.property_id;}
+   else if(!req.property.targets){res.property=props_msg[req.property.property_id]; prop_used = res.property.property_id;}
+   else if(req.property.targets && req.property.blue){
+     res.property.targets=true;
+     res.property.val_a = targets.y;
+   }
+   else {
+     res.property.targets=false;
+     res.property.val_a = targets.x;
+   }
 
 }
 
 bool ConfigServer::camPIDConfService(requestCamPID::Request &req,requestCamPID::Response &res)
 {
-	if(req.parameter.property_id==5 && req.parameter.blue==true){prop_used=6; res.parameterS=pid_msg[6];}
-	else {res.parameterS=pid_msg[req.parameter.property_id];prop_used = req.parameter.property_id;}
+	if(req.parameter.property_id==5 && req.parameter.blue==true && req.kalman==false){prop_used=6; res.parameterS=pid_msg[6];}
+	else if(req.kalman==false){res.parameterS=pid_msg[req.parameter.property_id];prop_used = req.parameter.property_id;}
+  else if(req.kalman == true){
+    res.Kalman = KalmanConfmsg;
+  }
 
 }
 
@@ -193,6 +205,7 @@ void ConfigServer::setProps(vector<float> prop_values)
 	}
 	props_msg[6].blue = true;
 	props_msg[6].property_id = 5;
+
 }
 
 
@@ -206,6 +219,9 @@ void ConfigServer::setPIDValues(vector<float> pid_values)
 		}
 		pid_msg[6].property_id = 5;
 		pid_msg[6].blue = true;
+
+    targets.x = int(pid_values[22]);
+    targets.y = int(pid_values[23]);
 }
 
 void ConfigServer::sendError(Point2d error)
@@ -239,4 +255,14 @@ bool ConfigServer::camROIConfService(requestROI::Request &req,requestROI::Respon
 	res.white=whiteRoi;
 	res.black=blackRoi;
 	return true;
+}
+
+void ConfigServer::setKalman(int Qx,int Qz,int Rx,int Rz)
+{
+  KalmanConfmsg.value_a = Qx;
+  KalmanConfmsg.value_b = Qz;
+  KalmanConfmsg.value_c = Rx;
+  KalmanConfmsg.window = Rz;
+  KalmanConfmsg.kalman = true;
+
 }

@@ -164,6 +164,7 @@ bool ImageProcessor::initializeBasics(int rob_id)
     fieldMapPath = cfgDir+QString(FIELDSFOLDERPATH)+field+".map";
     pidPath = cfgDir+agent+"/"+QString(PIDFILENAME);
     worldPath = cfgDir+agent+"/"+QString(WORLDFILENAME);
+    kalmanPath = cfgDir+agent+"/"+QString(KALMANFILENAME);
 
     ROS_INFO("System Configuration : %s in %s Field",agent.toStdString().c_str(),
     field.toStdString().c_str());
@@ -194,7 +195,7 @@ void ImageProcessor::rleModInitialization()
 {
     // Create Scan Lines used by RLE Algorithm
     idxImage = Mat(IMG_SIZE,IMG_SIZE,CV_8UC1,Scalar(0));
-    linesRad = ScanLines(idxImage,UAV_RADIAL, Point(imageConf.center_x,imageConf.center_y), 225, 70, 235,2,1);
+    linesRad = ScanLines(idxImage,UAV_RADIAL, Point(imageConf.center_x,imageConf.center_y), 220, 70, 235,2,1);
     linesCir = ScanLines(idxImage,UAV_CIRCULAR,Point(imageConf.center_x,imageConf.center_y), 20, 70, 235,0,0);
 
 }
@@ -240,7 +241,7 @@ void ImageProcessor::drawInterestInfo(Mat *buffer)
 
 void ImageProcessor::drawScanlines(Mat *buffer)
 {
-  linesRad.draw(*buffer,Scalar(0,0,255));
+  //linesRad.draw(*buffer,Scalar(0,0,255));
   rleLinesRad_2.draw(Scalar(255,255,255), Scalar(0,0,0), Scalar(255,255,255), buffer);
   rleLinesRad.draw(Scalar(255,255,255), Scalar(255,0,0), Scalar(255,255,255), buffer);
   //linesCir.draw(*buffer,(255,0,255));
@@ -292,10 +293,9 @@ void ImageProcessor::drawWorldPoints(Mat *buffer)
 // Detects interest points, as line points, ball points and obstacle points using RLE
 void ImageProcessor::detectInterestPoints(int orientation)
 {
-    // Obsrtacle blobs initialization
-	  obsBlob = Blob(); ballBlob = Blob();
     // Preprocess camera image, indexing it with predefined labels
     preProcessIndexedImage();
+
     // Run Different RLE's
 
     // RLE Lines
@@ -304,11 +304,12 @@ void ImageProcessor::detectInterestPoints(int orientation)
     rleLinesRad_2 = RLE(linesRad, UAV_GREEN_BIT, UAV_WHITE_BIT, UAV_GREEN_BIT, 2, 1, 2, 30);
 
     // RLE Ball
-    rleBallRad = RLE(linesRad, UAV_GREEN_BIT, UAV_ORANGE_BIT, UAV_GREEN_BIT, ballRLE.value_a, ballRLE.value_b, ballRLE.value_c, ballRLE.window);
+    rleBallRad = RLE(linesRad, UAV_GREEN_BIT, UAV_ORANGE_BIT, UAV_GREEN_BIT, int(ballRLE.value_a), ballRLE.value_b, ballRLE.value_c, ballRLE.window);
 
     // RLE Obstacles
     rleObs = RLE(linesRad, UAV_GREEN_BIT, UAV_BLACK_BIT, UAV_GREEN_BIT, 20, 8, 0, 30);
     rleObs_2 = RLE(linesRad, UAV_GREEN_BIT, UAV_BLACK_BIT, UAV_GREEN_BIT, 0, 30, 0, 5);
+
 
     //Analyze and parse RLE's
     linePoints.clear(); obstaclePoints.clear(); ballPoints.clear();
@@ -325,39 +326,46 @@ void ImageProcessor::detectInterestPoints(int orientation)
     // Ball RLE
     rleBallRad.pushData(ballPoints,idxImage,UAV_ORANGE_BIT);
 
-    //Detect Ball Candidates and using K-Means Algorithm
-    /*ballCentroids.clear();
-    kMeans ballKMeans(ballPoints,(int)ceil(ballPoints.size()/4)+1,30);
-    ballCentroids = ballKMeans.getClusters();*/
-
     // Maps line and obstacle points to world
     mapPoints(orientation);
+
 }
 
 void ImageProcessor::creatWorld()
 {
+  // Obsrtacle blobs initialization
+  obsBlob = Blob(); ballBlob = Blob();
+
   // Create Blobs due to obstacle points detected
-  obsBlob.createBlobs(mappedObstaclePoints, double(obsParameters.value_a/100.00), obsParameters.value_b, getCenter(), OBS_BLOB);
-  ballBlob.createBlobs(mappedBallPoints, double(ballParameters.value_a/100.00), ballParameters.value_b, getCenter(), BALL_BLOB);
+  obsBlob.createBlobs(mappedObstaclePoints, obsParameters.value_a, obsParameters.value_b, getCenter(), OBS_BLOB);
+  ballBlob.createBlobs(mappedBallPoints, ballParameters.value_a, ballParameters.value_b, getCenter(), BALL_BLOB);
 }
 
 // Maps poins to real world
 void ImageProcessor::mapPoints(int robot_heading)
 {
-   mappedLinePoints.clear(); mappedObstaclePoints.clear(); mappedBallPoints.clear(); LinePointsWeight.clear();
+   mappedLinePoints.clear(); mappedObstaclePoints.clear(); mappedBallPoints.clear();
 
    Point2d point;
-   double pointRelX, pointRelY, ang;
+   Point3d point_v2;
    double sqDist = 0.00;
 
 
    // Map line points
    for(unsigned int i = 0; i < linePoints.size(); i++){
-      point = worldMapping(linePoints[i]);
-      if(point.x<=(mirrorConf.max_distance-0.5) && point.x>RROBOT) {
-        mappedLinePoints.push_back(mapPointToRobot(robot_heading, point));
-        sqDist = sqrt(pow(worldMapping(linePoints[i]).x,2));
-        LinePointsWeight.push_back( (REFERENCE + DISTANCE)/ (DISTANCE + sqDist));
+      point_v2 = worldMappingP3(linePoints[i]);
+      if(point_v2.x<=(mirrorConf.max_distance-0.5) && point_v2.x>RROBOT) {
+
+        point.x = point_v2.x;
+        point.y = point_v2.y;
+
+        point = mapPointToRobot(robot_heading, point);
+
+        point_v2.x = point.x;
+        point_v2.y = point.y;
+
+        mappedLinePoints.push_back(point_v2);
+
       }
    }
 
@@ -405,11 +413,19 @@ Point2d ImageProcessor::worldMapping(Point p)
     return Point2d(distLookUpTable[p.x][p.y].x,distLookUpTable[p.x][p.y].y);
 }
 
+// Maps a point (pixel) to world values, returning world distance and angle
+Point3d ImageProcessor::worldMappingP3(Point p)
+{
+    if(p.x<0 || p.x>=IMG_SIZE || p.y<0 || p.y>=IMG_SIZE) return Point3d(100.0,0.00,0.00);
+    return distLookUpTable[p.x][p.y];
+}
+
 void ImageProcessor::generateMirrorConfiguration()
 {
+   double weight = 0.00;
+   double sqDist = 0.00;
    // Initialize Distance look up table
-   distLookUpTable.clear();
-   distLookUpTable = vector<vector<Point2d> >(IMG_SIZE*IMG_SIZE,vector<Point2d>(0));
+   distLookUpTable = vector<vector<Point3d> >(IMG_SIZE*IMG_SIZE,vector<Point3d>(0));
 
    for(int i=0; i<=IMG_SIZE; i++){ // columns
      for(int j=0; j<=IMG_SIZE; j++){ // rows
@@ -417,7 +433,9 @@ void ImageProcessor::generateMirrorConfiguration()
          double angulo = (atan2((j-imageConf.center_x),(i-imageConf.center_y))*(180.0/M_PI))-imageConf.tilt;
          while(angulo<0.0)angulo+=360.0;
          while(angulo>360.0)angulo-=360.0;
-         distLookUpTable[j].push_back(Point2d(dist,angulo));
+         sqDist = sqrt(pow(dist,2));
+         weight = (REFERENCE + DISTANCE)/ (DISTANCE + sqDist);
+         distLookUpTable[j].push_back(Point3d(dist,angulo,weight));
      }
    }
 }
@@ -431,55 +449,6 @@ void ImageProcessor::updateDists(double max, double step, vector<short unsigned 
    mirrorConf.pixel_distances = pix_dists;
    mirrorConf.max_distance = max;
    mirrorConf.step = step;
-}
-
-// Detects ball position based on ball points or image segmentation
-void ImageProcessor::detectBallPosition()
-{
-    ballCandidates.clear();
-    int size = 60;int cx = 0, cy = 0;
-    int size2 = size/2;
-    Vec3b *colorRow = NULL; uchar *tempRow = NULL;Q_UNUSED(colorRow);
-    int classifier = 0;
-    for(unsigned int centroids = 0; centroids < ballCentroids.size(); centroids++){
-        cx = ballCentroids[centroids].y; cy = ballCentroids[centroids].x;
-        Mat tempCandidate = Mat(size,size,CV_8UC1,Scalar(0));
-        for(int row=-size2+cx;row<size2+cx;row++){
-            colorRow = original.ptr<Vec3b>(row);
-            tempRow = tempCandidate.ptr<uchar>(row-cx+size2);
-            for(int col=-size2+cy; col<size2+cy;col++){
-                classifier = getClassifier(col,row);
-                if(classifier != UAV_ORANGE_BIT){
-                    tempRow[col-cy+size2] = 255;
-                }
-
-            }
-        }
-
-        //Analyse tempCandidate which was the candidate (binary representation)
-        vector<Mat> contours; Moments moment;
-        double area;
-        Point2f center; float radius;
-        findContours(tempCandidate, contours, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
-        for (unsigned int i = 0; i < contours.size(); i++){
-            if (contourArea(contours[i])>3 && contourArea(contours[i])<2500){
-                moment = moments(contours[i], true);
-                area = moment.m00;
-                Rect rBound = boundingRect(contours[i]); // calculate min enclosing circle and rectangle
-                minEnclosingCircle((Mat)contours[i], center, radius);
-
-                double wh = fabs(1 - ((double)rBound.width / rBound.height)); // calculate circle ratios
-                double pi = fabs(1 - (fabs(area)) / (CV_PI * pow(radius, 2)));
-                if (wh<=0.6 && pi<=0.6){
-                    Point cc = center;
-                    cc.x += ballCentroids[centroids].x-size2;
-                    cc.y += ballCentroids[centroids].y-size2;
-                    ballCandidates.push_back(Point3d(cc.x,cc.y,radius));
-                    circle(original,cc,radius,Scalar(255,255,0),2);
-                }
-            }
-        }
-    }
 }
 
 // Paints a pixel accordingly to its classifier
@@ -964,7 +933,7 @@ void ImageProcessor::setCamPropreties(cameraProperty::ConstPtr msg)
   				}
   			}
         omniCamera->writePropConfig();
-  		} else omniCamera->toggleFirsttime();
+  		} else if(msg->reset == true)omniCamera->toggleFirsttime();
 }
 
 // Returns vector of Camera Properties values
@@ -986,14 +955,20 @@ vector<float> ImageProcessor::getCamProperties()
 // Set PID controler given the values in the message
 void ImageProcessor::setPropControlerPID(PID::ConstPtr msg)
 {
-  if(msg->calibrate!=true) omniCamera->setPropControlPID(msg->property_id,msg->p,msg->i,msg->d,msg->blue);
-	else omniCamera->toggleCalibrate();
+  if(msg->calibrate!=true) {
+    omniCamera->setPropControlPID(msg->property_id,msg->p,msg->i,msg->d,msg->blue);
+    ROS_WARN("New PID value set.");
+  }
+	else {
+    omniCamera->toggleCalibrate();
+    ROS_WARN("Auto Calibration activated.");
+  }
 }
 
 // Read from file PID controler of Properties
 vector<float> ImageProcessor::getPropControlerPID()
 {
-    vector<float> pid_conf(21);
+    vector<float> pid_conf(23);
 
 	 QFile file(pidPath);
 	 if(!file.open(QIODevice::ReadOnly)) {
@@ -1028,6 +1003,10 @@ vector<float> ImageProcessor::getPropControlerPID()
 		if(i==0)whiteRoi=Roi;
 		else blackRoi=Roi;
 		}
+    line = in.readLine();
+    pid_list = line.right(line.size()-line.indexOf('=')-1).split(",");
+    pid_conf[22] = pid_list[0].toDouble();
+    pid_conf[23] = pid_list[1].toDouble();
     file.close();
 
     if(count_list!=0){
@@ -1095,8 +1074,8 @@ bool ImageProcessor::getWorldConfiguration()
      return false;
   }
 
-  obsParameters.value_a = values.at(0).toInt();
-  obsParameters.value_b = values.at(1).toInt();
+  obsParameters.value_a = values.at(0).toDouble();
+  obsParameters.value_b = values.at(1).toDouble();
   obsParameters.ball_obs = false;
   obsParameters.RLE = false;
 
@@ -1105,8 +1084,8 @@ bool ImageProcessor::getWorldConfiguration()
      ROS_ERROR("Bad Configuration (1) in %s",WORLDFILENAME);
      return false;
   }
-  ballParameters.value_a = values.at(0).toInt();
-  ballParameters.value_b = values.at(1).toInt();
+  ballParameters.value_a = values.at(0).toDouble();
+  ballParameters.value_b = values.at(1).toDouble();
   ballParameters.ball_obs = true;
   obsParameters.RLE = false;
 
@@ -1152,3 +1131,60 @@ Point2d ImageProcessor::getPropError(int prop_in_use)
 {
   return omniCamera->getError(prop_in_use);
 }
+
+void ImageProcessor::setCalibrationTargets(cameraProperty::ConstPtr msg)
+{
+  if(msg->blue==true)omniCamera->setSatTarget(msg->val_a);
+  else omniCamera->setLumiTarget(msg->val_a);
+
+}
+
+/*
+// Detects ball position based on ball points or image segmentation
+void ImageProcessor::detectBallPosition()
+{
+    ballCandidates.clear();
+    int size = 60;int cx = 0, cy = 0;
+    int size2 = size/2;
+    Vec3b *colorRow = NULL; uchar *tempRow = NULL;Q_UNUSED(colorRow);
+    int classifier = 0;
+    for(unsigned int centroids = 0; centroids < ballCentroids.size(); centroids++){
+        cx = ballCentroids[centroids].y; cy = ballCentroids[centroids].x;
+        Mat tempCandidate = Mat(size,size,CV_8UC1,Scalar(0));
+        for(int row=-size2+cx;row<size2+cx;row++){
+            colorRow = original.ptr<Vec3b>(row);
+            tempRow = tempCandidate.ptr<uchar>(row-cx+size2);
+            for(int col=-size2+cy; col<size2+cy;col++){
+                classifier = getClassifier(col,row);
+                if(classifier != UAV_ORANGE_BIT){
+                    tempRow[col-cy+size2] = 255;
+                }
+
+            }
+        }
+
+        //Analyse tempCandidate which was the candidate (binary representation)
+        vector<Mat> contours; Moments moment;
+        double area;
+        Point2f center; float radius;
+        findContours(tempCandidate, contours, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+        for (unsigned int i = 0; i < contours.size(); i++){
+            if (contourArea(contours[i])>3 && contourArea(contours[i])<2500){
+                moment = moments(contours[i], true);
+                area = moment.m00;
+                Rect rBound = boundingRect(contours[i]); // calculate min enclosing circle and rectangle
+                minEnclosingCircle((Mat)contours[i], center, radius);
+
+                double wh = fabs(1 - ((double)rBound.width / rBound.height)); // calculate circle ratios
+                double pi = fabs(1 - (fabs(area)) / (CV_PI * pow(radius, 2)));
+                if (wh<=0.6 && pi<=0.6){
+                    Point cc = center;
+                    cc.x += ballCentroids[centroids].x-size2;
+                    cc.y += ballCentroids[centroids].y-size2;
+                    ballCandidates.push_back(Point3d(cc.x,cc.y,radius));
+                    circle(original,cc,radius,Scalar(255,255,0),2);
+                }
+            }
+        }
+    }
+}*/

@@ -55,6 +55,7 @@ public:
    void setPIDValues(vector<float> pid_values);
    void sendError(Point2d error);
    void setROIs(vector<ROI> rois);
+   void setKalman(int Qx,int Qz,int Rx,int Rz);
    int prop_used;
    inline bool getCalib(){ return calib;}
 private:
@@ -102,7 +103,8 @@ private:
    cameraProperty props_msg [7];
    PID pid_msg[7];
    ROI whiteRoi,blackRoi;
-   worldConfig ballConfmsg, obsConfmsg, RLEConfmsg;
+   worldConfig ballConfmsg, obsConfmsg, RLEConfmsg, KalmanConfmsg;
+   Point targets;
 
 private slots:
    void getSubscribers();

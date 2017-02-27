@@ -6,6 +6,7 @@ BlackflyCam::BlackflyCam(bool cal, int robot_id)
 {
     calibrate = cal;
     rob_id = robot_id;
+
     // Initialize PID gains for Properties controler
     if(!initPidValues(rob_id)){
 		ROS_ERROR("Error Reading Properties PID controler gains");
@@ -17,11 +18,12 @@ BlackflyCam::BlackflyCam(bool cal, int robot_id)
     frameBuffer = new Mat(480,480,CV_8UC3,Scalar(0,0,0));
 
     //Parameters for calibration
-    minError_Lumi=127*0.05;
-    minError_Sat=97*0.05;
+    minError_Lumi=lumiTarget*0.05;
+    minError_Sat=satTarget*0.1;
     //minError_UV_1=127+(127*0.15);
     //minError_UV_2=127-(127*0.15);
     minError_RGB=127*0.1;
+
     firsttime=true;
 }
 
@@ -102,7 +104,7 @@ void BlackflyCam::printCameraInfo()
 void BlackflyCam::setNewFrame(Image *pImage)
 {
     static int count_conf=0;
-    bool do_calibration = false;
+    static bool do_calibration = false;
 
     /// Counter for auto calibration
     if(count_conf>32 && calibrate){
@@ -491,8 +493,8 @@ void BlackflyCam::calcLumiHistogram()
   histvalue.resize(256);
 
   if(first==true){
-      for(int i=0;i<gray.cols*image.rows;i++)
-          histvalue[(int)gray.ptr()[i]]++;
+      for(int i=0;i<gray.cols*image.rows;i++) histvalue[(int)gray.ptr()[i]]++;
+      first = false;
   }
 
   else{
@@ -515,8 +517,8 @@ void BlackflyCam::calcSatHistogram()
   histvalue.resize(256);
 
   if(first){
-      for(int i=0;i<Hsv.cols*Hsv.rows;i++)
-          histvalue[(int)Hsv.ptr()[i]]++;
+      for(int i=0;i<Hsv.cols*Hsv.rows;i++) histvalue[(int)Hsv.ptr()[i]]++;
+      first = false;
   }
   else{
       for(int i=0;i<Hsv.cols*Hsv.rows;i=i+10)
@@ -637,7 +639,7 @@ bool BlackflyCam::cameraCalibrate()
     //Initialization of some variables
     calcLumiHistogram();
     msv=calcMean();
-    msvError=107-msv;
+    msvError=lumiTarget-msv;
 
     if(msvError>minError_Lumi || msvError<-(minError_Lumi))
     {
@@ -658,12 +660,12 @@ bool BlackflyCam::cameraCalibrate()
         }
     }
     else times++;
-
-    if(msv>90 && msv<119 &&(times>=4 || changed==false))
+    minError_Sat=satTarget*0.1;
+    if(msv>(satTarget - minError_Sat) && msv<(satTarget + minError_Sat) &&(times>=4 || changed==false))
     {
         times=0;
         calcSatHistogram();
-        msvError=97-calcMean();
+        msvError=satTarget-calcMean();
         if(msvError>minError_Sat || msvError<(-minError_Sat))
         {
             changed=true;
@@ -673,6 +675,7 @@ bool BlackflyCam::cameraCalibrate()
         }
 
 	  Scalar rgbMean=averageRGB();
+
 	  /*Scalar uvMean=averageUV();
 	  if(uvMean[0]>minError_UV_1 || uvMean[0]<minError_UV_2 || uvMean[1]>minError_UV_1 || uvMean[1]<minError_UV_2)
         {
@@ -690,10 +693,7 @@ bool BlackflyCam::cameraCalibrate()
         {
            changed = true;
            float rgbError = 0;
-           for(int i = 0; i < 3; i++)
-           {
-               if(rgbError < rgbMean[i])rgbError = rgbMean[i];
-           }
+           for(int i = 0; i < 3; i++)rgbError += rgbMean[i];
            brig = BrigPID->calc_pid(brig,rgbError/3);
            if(brig>(getBrigtnessMax()/2))brig = (getBrigtnessMax()/2);
            setBrigtness(brig);
@@ -727,7 +727,6 @@ void BlackflyCam::setPropControlPID(int id, float p, float i, float d, bool blue
 ///
 /// \brief Initializes PID controler of Properties readed from a file
 ///
-
 bool BlackflyCam::initPidValues(int robot_id)
 {
     float pid_conf[21];
@@ -765,6 +764,12 @@ bool BlackflyCam::initPidValues(int robot_id)
 		if(i==1)roi_black = Rect(pid_list[0].toInt(),pid_list[1].toInt(),pid_list[2].toInt(),pid_list[2].toInt());
 		else roi_white = Rect(pid_list[0].toInt(),pid_list[1].toInt(),pid_list[2].toInt(),pid_list[2].toInt());
 		}
+
+    line = in.readLine();
+    pid_list = line.right(line.size()-line.indexOf('=')-1).split(",");
+    lumiTarget = pid_list[0].toInt();
+    satTarget = pid_list[1].toInt();
+
     file.close();
 
     if(count_list!=0){
@@ -806,8 +811,11 @@ bool BlackflyCam::writePIDConfig()
 	in<<"EXPOSSURE="<<"0,0,0"<<"\r\n";
 	in<<"WHITE="<<roi_white.x<<","<<roi_white.y<<","<<roi_white.height<<"\r\n";
 	in<<"BLACK="<<roi_black.x<<","<<roi_black.y<<","<<roi_black.height<<"\r\n";
+  in<<"TARGETS"<<lumiTarget<<","<<satTarget<<"\r\n";
 	QString message = QString("#Property=Kp, Ki, Kd\r\n");
     in << message;
+    message = QString("#ROI=X,Y,AREA\r\n#TARGETS=LUMI, SAT");
+    in<<message;
     message = QString("#DONT CHANGE THE ORDER OF THE CONFIGURATIONS");
     in << message;
     file.close();
@@ -869,4 +877,28 @@ Point2d BlackflyCam::getError(int prop_in_use)
 		//ROS_ERROR("Property ID Out Of Range %d",prop_in_use);point.x=0.00;
 		return point;
 	}
+}
+
+void BlackflyCam::setSatTarget(int val)
+{
+  satTarget = val;
+  writePIDConfig();
+}
+
+void BlackflyCam::setLumiTarget(int val)
+{
+  lumiTarget = val;
+  writePIDConfig();
+}
+
+
+int BlackflyCam::getSatTarget()
+{
+  return satTarget;
+}
+
+
+int BlackflyCam::getLumiTarget()
+{
+  return lumiTarget;
 }

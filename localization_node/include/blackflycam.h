@@ -135,6 +135,11 @@ public:
     //###############################
     //###############################
 
+    void setSatTarget(int val);
+    void setLumiTarget(int val);
+    int getSatTarget();
+    int getLumiTarget();
+
 private:
     //#### CAMERA INTERFACE DATA ####
     //###############################
@@ -169,7 +174,7 @@ private:
     std::vector<int> histvalue;
     Mat image_roi_white,image_roi_black,image;
     float msvError;
-    int msv;
+    int msv, satTarget, lumiTarget;
     float minError_Lumi,minError_Sat,minError_UV_1,minError_UV_2,minError_RGB;
     //##########################
     //##########################

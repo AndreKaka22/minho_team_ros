@@ -7,6 +7,7 @@
 #include <QStringList>
 #include "kmeans.h"
 #include "RLE.h"
+#include <QTime>
 #include "ScanLines.h"
 #include "Vec.h"
 #include "blackflycam.h"
@@ -37,11 +38,12 @@ using minho_team_ros::worldConfig;
 class ImageProcessor
 {
 public:
+  QTime loctime;
    ImageProcessor(int rob_id, bool begin, bool *init_success);
    typedef Mat* (ImageProcessor::*imageAcquisitionFunction)(bool *success);
    /* Detection Functions */
    void detectInterestPoints(int orientation); // Detects linePoints, ballPoints and obstaclePoints
-   void detectBallPosition(); // Given the detected ballRLE find the optimal candidate
+   //void detectBallPosition(); // Given the detected ballRLE find the optimal candidate
    void creatWorld();
 
    /* Image Output Functions */
@@ -81,6 +83,7 @@ public:
    int d2p(Point p1,Point p2); // Returns distance between two points
    double d2pWorld(int pixeis); // Returns world distance given pixel distance
    Point2d worldMapping(Point p); // Maps point to world (world dist, angle)
+   Point3d worldMappingP3(Point p); // Maps point to world (world dist, angle)
 
    /* Initializations */
    void variablesInitialization(); // Inits other variables
@@ -96,20 +99,20 @@ public:
    bool initializeBasics(int rob_id);
    QString getField();
    inline QString getWorldFileName() { return fieldMapPath;}
+   inline QString getKalmanFileName() { return kalmanPath;}
    void drawWorldPoints(Mat *buffer);
 
    void mapPoints(int robot_heading);
    Point2d mapPointToRobot(double orientation, Point2d dist_lut);
 
    /* WORLD STATE INFORMATION Buffers */
-   vector<Point3d>ballCandidates;
    vector<Point>linePoints;
    vector<Point>obstaclePoints;
    vector<Point>ballCentroids;
    vector<Point>ballPoints;
 
-   vector<Point2d> mappedLinePoints, mappedObstaclePoints, mappedBallPoints;
-   vector<double>  LinePointsWeight;
+   vector<Point2d> mappedObstaclePoints, mappedBallPoints;
+   vector<Point3d> mappedLinePoints;
 
    /* Image Acquisition function pointer */
    imageAcquisitionFunction acquireImage;
@@ -124,6 +127,7 @@ public:
    void setROIs(ROI::ConstPtr msg); // Set ROI's to use
    void changeBlobsConfiguration(worldConfig::ConstPtr msg);
    void changeRLEConfiguration(worldConfig::ConstPtr msg);
+   void setCalibrationTargets(cameraProperty::ConstPtr msg);
 
    //Blobs
    Blob obsBlob, ballBlob;
@@ -131,7 +135,6 @@ public:
    inline worldConfig getBallConfAsMsg(){ return ballParameters;}
    inline worldConfig getObsConfAsMsg(){ return obsParameters;}
    inline worldConfig getRLEConfAsMsg(){ return ballRLE;}
-
 
 private:
    /* Camera Driver and parameters*/
@@ -153,7 +156,7 @@ private:
    mirrorConfig mirrorConf;
    vector<double> distPix;
    vector<double> distReal;
-   vector<vector<Point2d> >distLookUpTable;
+   vector<vector<Point3d> >distLookUpTable;
    double robotHeight;
 
    // Implementation USING RLE
@@ -165,7 +168,7 @@ private:
    //ConfigFiles strings
    QString field; QString agent;
    QString mirrorParamsPath, imageParamsPath ,maskPath,lutPath, pidPath;
-   QString fieldMapPath, worldPath;
+   QString fieldMapPath, worldPath, kalmanPath;
    QString imgFolderPath;
 
    //ROI Variables
@@ -175,6 +178,7 @@ private:
    worldConfig ballParameters, obsParameters, ballRLE;
    bool getWorldConfiguration();
    bool WriteWorldConfiguration();
+
 };
 
 #endif // IMAGEPROCESSOR_H

@@ -25,9 +25,11 @@ class Localization : public QObject
 {
    Q_OBJECT
 public:
-   explicit Localization(int rob_id, ros::NodeHandle *par, bool *init_success, bool use_camera, QObject *parent = 0); // Constructor
+   explicit Localization(int rob_id, ros::NodeHandle *par, bool *init_success, bool use_camera, int side, QObject *parent = 0); // Constructor
    ~Localization();
 private:
+
+   int fieldSide;
 
    //Major components
    ImageProcessor *processor;
@@ -66,12 +68,11 @@ private:
 
    vector<Point2d> rotatedLinePoints;
 
-   int getFieldIndexX(float value);
-   int getFieldIndexY(float value);
 
 private slots:
    void initVariables();
-   void initializeKalmanFilter();
+   bool initializeKalmanFilter();
+   bool WriteKalmanFilter();
    bool initWorldMap();
    void stopImageAssigning();
    void changeImageAssigning(uint8_t type);
@@ -82,28 +83,32 @@ private slots:
    void changeCamPID(PID::ConstPtr msg);
    void changeROI(ROI::ConstPtr msg);
    void changeWorldConfiguration(worldConfig::ConstPtr msg);
+   void setKalman(worldConfig::ConstPtr msg);
    bool doReloc(requestReloc::Request &req,requestReloc::Response &res);
    bool setExtDebug(requestExtendedDebug::Request &req,requestExtendedDebug::Response &res);
+   int getFieldIndexX(float value);
+   int getFieldIndexY(float value);
 public slots:
    void hardwareCallback(const hardwareInfo::ConstPtr &msg);
    void discoverWorldModel(); // Main Funcition
    void fuseEstimates(); // Fuse vision and odometry estimations
    void computeVelocities(); // Computes ball and robot velocities
    void decideBallPossession(); // decides wether the robot has or not the ball
-   void detectObstacles();
+   void sendWorldInfo();
    void generateDebugData(); // if requested, puts extended debug data on robotInfo
    bool computeGlobalLocalization(int side); //compute initial localization globally
    void computeLocalLocalization(); //compute next localization locally
    // Math Utilities
    float normalizeAngleRad(float angle);
    float normalizeAngleDeg(float angle);
-   /*Point2d mapPointToRobot(double orientation, Point2d dist_lut);
-   void mapLinePoints(int robot_heading);*/
    int getLine(float x, float y); //Returns matching map position
-   float errorFunction(float error, int p);
+   float errorFunction(float error, double weight);
    bool isInbounds(Point2d point,Point2d center);
    void calcHistOrientation();
    void rotatePoints(int angle);
+
+   /*Point2d mapPointToRobot(double orientation, Point2d dist_lut);
+   void mapLinePoints(int robot_heading);*/
 };
 
 #endif // LOCALIZATION_H
